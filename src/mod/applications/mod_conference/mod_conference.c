@@ -254,11 +254,13 @@ typedef struct conference_obj {
 	char *maxmember_sound;
 	uint32_t announce_count;
 	char *pin;
+	char *mpin;
 	char *pin_sound;
 	char *bad_pin_sound;
 	char *profile_name;
 	char *domain;
 	char *caller_controls;
+	char *mcaller_controls;
 	uint32_t flags;
 	member_flag_t mflags;
 	switch_call_cause_t bridge_hangup_cause;
@@ -280,6 +282,7 @@ typedef struct conference_obj {
 	switch_speech_handle_t *sh;
 	switch_byte_t *not_talking_buf;
 	uint32_t not_talking_buf_len;
+	int pin_retries;
 	int comfort_noise_level;
 	int is_recording;
 	int record_count;
@@ -5690,6 +5693,14 @@ static int setup_media(conference_member_t *member, conference_obj_t *conference
 
 }
 
+#define validate_pin(buf, pin, mpin) \
+	pin_valid = (pin && strcmp(buf, pin) == 0); \
+	if (!pin_valid && mpin && strcmp(buf, mpin) == 0) { \
+		switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_CRIT, "Moderator PIN found!\n"); \
+		pin_valid = 1; \
+		mpin_matched = 1; \
+	} \
+	switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_CRIT, "Valid pins are '%s' and '%s' but not %s!\n", pin, mpin, buf); \
 /* Application interface function that is called from the dialplan to join the channel to a conference */
 SWITCH_STANDARD_APP(conference_function)
 {
@@ -5709,10 +5720,12 @@ SWITCH_STANDARD_APP(conference_function)
 	member_flag_t mflags = 0;
 	switch_core_session_message_t msg = { 0 };
 	uint8_t rl = 0, isbr = 0;
-	char *dpin = NULL;
+	char *dpin = "";
+	char *mdpin = "";
 	conf_xml_cfg_t xml_cfg = { 0 };
 	switch_event_t *params = NULL;
 	int locked = 0;
+	int mpin_matched = 0;
 	uint32_t *mid;
 
 	if (!switch_channel_test_app_flag_key("conf_silent", channel, CONF_SILENT_DONE) &&
@@ -5937,16 +5950,18 @@ SWITCH_STANDARD_APP(conference_function)
 		}
 		rl++;
 
-		if (!dpin && conference->pin) {
+		if (zstr(dpin) && conference->pin) {
 			dpin = conference->pin;
+		}
+		if (zstr(mdpin) && conference->mpin) {
+			mdpin = conference->mpin;
 		}
 
 
-
 		/* if this is not an outbound call, deal with conference pins */
-		if (enforce_security && !zstr(dpin)) {
+		if (enforce_security && (!zstr(dpin) || !zstr(mdpin))) {
 			char pin_buf[80] = "";
-			int pin_retries = 3;	/* XXX - this should be configurable - i'm too lazy to do it right now... */
+			int pin_retries = conference->pin_retries;
 			int pin_valid = 0;
 			switch_status_t status = SWITCH_STATUS_SUCCESS;
 			char *supplied_pin_value;
@@ -5966,7 +5981,8 @@ SWITCH_STANDARD_APP(conference_function)
 				while (*supplied_pin_value != 0 && *supplied_pin_value != ';') {
 					pin_buf[i++] = *supplied_pin_value++;
 				}
-				pin_valid = (strcmp(pin_buf, dpin) == 0);
+
+				validate_pin(pin_buf, dpin, mdpin);
 				memset(pin_buf, 0, sizeof(pin_buf));
 			}
 
@@ -5979,6 +5995,7 @@ SWITCH_STANDARD_APP(conference_function)
 			}
 
 			while (!pin_valid && pin_retries && status == SWITCH_STATUS_SUCCESS) {
+				int maxpin = strlen(dpin) > strlen(mdpin) ? strlen(dpin) : strlen(mdpin);
 				switch_status_t pstatus = SWITCH_STATUS_FALSE;
 
 				/* be friendly */
@@ -5997,19 +6014,21 @@ SWITCH_STANDARD_APP(conference_function)
 				}
 
 				/* wait for them if neccessary */
-				if (strlen(pin_buf) < strlen(dpin)) {
+				if (strlen(pin_buf) < maxpin) {
 					char *buf = pin_buf + strlen(pin_buf);
 					char term = '\0';
 
 					status = switch_ivr_collect_digits_count(session,
 															 buf,
-															 sizeof(pin_buf) - strlen(pin_buf), strlen(dpin) - strlen(pin_buf), "#", &term, 10000, 0, 0);
+															 sizeof(pin_buf) - strlen(pin_buf), maxpin - strlen(pin_buf), "#", &term, 10000, 0, 0);
 					if (status == SWITCH_STATUS_TIMEOUT) {
 						status = SWITCH_STATUS_SUCCESS;
 					}
 				}
 
-				pin_valid = (status == SWITCH_STATUS_SUCCESS && strcmp(pin_buf, dpin) == 0);
+				if (status == SWITCH_STATUS_SUCCESS) {
+					validate_pin(pin_buf, dpin, mdpin);
+				}
 				if (!pin_valid) {
 					/* zero the collected pin */
 					memset(pin_buf, 0, sizeof(pin_buf));
@@ -6110,7 +6129,11 @@ SWITCH_STANDARD_APP(conference_function)
 
 	mflags = conference->mflags;
 	set_mflags(flags_str, &mflags);
-	switch_set_flag_locked((&member), MFLAG_RUNNING | mflags);
+	mflags |= MFLAG_RUNNING;
+	if (mpin_matched) {
+		mflags |= MFLAG_MOD;
+	}
+	switch_set_flag_locked((&member), mflags);
 
 	if (mflags & MFLAG_MINTWO) {
 		conference->min = 2;
@@ -6356,6 +6379,7 @@ static conference_obj_t *conference_new(char *name, conf_xml_cfg_t cfg, switch_c
 	char *is_unlocked_sound = NULL;
 	char *kicked_sound = NULL;
 	char *pin = NULL;
+	char *mpin = NULL;
 	char *pin_sound = NULL;
 	char *bad_pin_sound = NULL;
 	char *energy_level = NULL;
@@ -6372,6 +6396,7 @@ static conference_obj_t *conference_new(char *name, conf_xml_cfg_t cfg, switch_c
 	char *maxmember_sound = NULL;
 	uint32_t rate = 8000, interval = 20;
 	int comfort_noise_level = 0;
+	int pin_retries = 3;
 	char *suppress_events = NULL;
 	char *verbose_events = NULL;
 	char *auto_record = NULL;
@@ -6508,6 +6533,13 @@ static conference_obj_t *conference_new(char *name, conf_xml_cfg_t cfg, switch_c
 				kicked_sound = val;
 			} else if (!strcasecmp(var, "pin") && !zstr(val)) {
 				pin = val;
+			} else if (!strcasecmp(var, "moderator-pin") && !zstr(val)) {
+				mpin = val;
+			} else if (!strcasecmp(var, "pin-retries") && !zstr(val)) {
+				int tmp = atoi(val);
+				if (tmp >= 0) {
+					pin_retries = tmp;
+				}
 			} else if (!strcasecmp(var, "pin-sound") && !zstr(val)) {
 				pin_sound = val;
 			} else if (!strcasecmp(var, "bad-pin-sound") && !zstr(val)) {
@@ -6610,6 +6642,7 @@ static conference_obj_t *conference_new(char *name, conf_xml_cfg_t cfg, switch_c
 	}
 
 	conference->comfort_noise_level = comfort_noise_level;
+	conference->pin_retries = pin_retries;
 	conference->caller_id_name = switch_core_strdup(conference->pool, caller_id_name);
 	conference->caller_id_number = switch_core_strdup(conference->pool, caller_id_number);
 	conference->caller_controls = switch_core_strdup(conference->pool, caller_controls);
@@ -6691,6 +6724,10 @@ static conference_obj_t *conference_new(char *name, conf_xml_cfg_t cfg, switch_c
 
 	if (!zstr(pin)) {
 		conference->pin = switch_core_strdup(conference->pool, pin);
+	}
+
+	if (!zstr(mpin)) {
+		conference->mpin = switch_core_strdup(conference->pool, mpin);
 	}
 
 	if (!zstr(alone_sound)) {
