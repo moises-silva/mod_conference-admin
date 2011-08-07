@@ -5701,11 +5701,10 @@ static int setup_media(conference_member_t *member, conference_obj_t *conference
 #define validate_pin(buf, pin, mpin) \
 	pin_valid = (pin && strcmp(buf, pin) == 0); \
 	if (!pin_valid && mpin && strcmp(buf, mpin) == 0) { \
-		switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_CRIT, "Moderator PIN found!\n"); \
+		switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "Moderator PIN found!\n"); \
 		pin_valid = 1; \
 		mpin_matched = 1; \
-	} \
-	switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_CRIT, "Valid pins are '%s' and '%s' but not %s!\n", pin, mpin, buf); \
+	} 
 /* Application interface function that is called from the dialplan to join the channel to a conference */
 SWITCH_STANDARD_APP(conference_function)
 {
