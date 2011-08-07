@@ -260,7 +260,7 @@ typedef struct conference_obj {
 	char *profile_name;
 	char *domain;
 	char *caller_controls;
-	char *mcaller_controls;
+	char *moderator_controls;
 	uint32_t flags;
 	member_flag_t mflags;
 	switch_call_cause_t bridge_hangup_cause;
@@ -709,14 +709,15 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
 			switch_event_fire(&event);
 		}
 
+		channel = switch_core_session_get_channel(member->session);
+		switch_channel_set_variable_printf(channel, "conference_member_id", "%d", member->id);
+		switch_channel_set_variable_printf(channel, "conference_moderator", "%s", switch_test_flag(member, MFLAG_MOD) ? "true" : "false");
+		switch_channel_set_variable(channel, CONFERENCE_UUID_VARIABLE, conference->uuid_str);
+		
 		if (switch_test_flag(conference, CFLAG_WAIT_MOD) && switch_test_flag(member, MFLAG_MOD)) {
 			switch_clear_flag(conference, CFLAG_WAIT_MOD);
 		}
 
-		channel = switch_core_session_get_channel(member->session);
-		switch_channel_set_variable_printf(channel, "conference_member_id", "%d", member->id);
-		switch_channel_set_variable(channel, CONFERENCE_UUID_VARIABLE, conference->uuid_str);
-		
 		if (conference->count > 1) {
 			if (conference->moh_sound && !switch_test_flag(conference, CFLAG_WAIT_MOD)) {
 				/* stop MoH if any */
@@ -791,7 +792,11 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
 		controls = switch_channel_get_variable(channel, "conference_controls");
 
 		if (zstr(controls)) {
-			controls = conference->caller_controls;
+			if (!switch_test_flag(member, MFLAG_MOD) || !conference->moderator_controls) {
+				controls = conference->caller_controls;
+			} else {
+				controls = conference->moderator_controls;
+			}
 		}
 
 		if (zstr(controls)) {
@@ -6387,6 +6392,7 @@ static conference_obj_t *conference_new(char *name, conf_xml_cfg_t cfg, switch_c
 	char *caller_id_name = NULL;
 	char *caller_id_number = NULL;
 	char *caller_controls = NULL;
+	char *moderator_controls = NULL;
 	char *member_flags = NULL;
 	char *conference_flags = NULL;
 	char *perpetual_sound = NULL;
@@ -6554,6 +6560,8 @@ static conference_obj_t *conference_new(char *name, conf_xml_cfg_t cfg, switch_c
 				caller_id_number = val;
 			} else if (!strcasecmp(var, "caller-controls") && !zstr(val)) {
 				caller_controls = val;
+			} else if (!strcasecmp(var, "moderator-controls") && !zstr(val)) {
+				moderator_controls = val;
 			} else if (!strcasecmp(var, "comfort-noise") && !zstr(val)) {
 				int tmp;
 				tmp = atoi(val);
@@ -6646,6 +6654,7 @@ static conference_obj_t *conference_new(char *name, conf_xml_cfg_t cfg, switch_c
 	conference->caller_id_name = switch_core_strdup(conference->pool, caller_id_name);
 	conference->caller_id_number = switch_core_strdup(conference->pool, caller_id_number);
 	conference->caller_controls = switch_core_strdup(conference->pool, caller_controls);
+	conference->moderator_controls = switch_core_strdup(conference->pool, moderator_controls);
 	conference->run_time = switch_epoch_time_now(NULL);
 	
 
