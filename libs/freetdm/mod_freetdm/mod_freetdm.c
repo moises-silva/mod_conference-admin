@@ -695,7 +695,8 @@ static switch_status_t channel_read_frame(switch_core_session_t *session, switch
 			total_to -= chunk;
 			if (total_to <= 0) {
 				ftdm_log(FTDM_LOG_WARNING, "Too many timeouts while waiting for I/O\n");
-				goto fail;
+				do_break = 1;
+				goto top;
 			}
 		}
 		goto top;
@@ -712,6 +713,7 @@ static switch_status_t channel_read_frame(switch_core_session_t *session, switch
 			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "too many I/O read errors on device %d:%d!\n", span_id, chan_id);
 			goto fail;
 		}
+		goto top;
 	} else {
 		tech_pvt->read_error = 0;
 	}
