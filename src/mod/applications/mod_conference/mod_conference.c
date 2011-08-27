@@ -290,6 +290,8 @@ typedef struct conference_obj {
 	int is_recording;
 	int record_count;
 	int video_running;
+	int ivr_dtmf_timeout;
+	int ivr_input_timeout;
 	uint32_t eflags;
 	uint32_t verbose_events;
 	int end_count;
@@ -791,7 +793,8 @@ static switch_status_t conference_add_member(conference_obj_t *conference, confe
 		switch_channel_clear_app_flag_key("conf_silent", channel, CONF_SILENT_REQ);
 		switch_channel_set_app_flag_key("conf_silent", channel, CONF_SILENT_DONE);
 
-		switch_ivr_dmachine_create(&member->dmachine, "mod_conference", NULL, 500, 0, NULL, NULL, NULL);
+		switch_ivr_dmachine_create(&member->dmachine, "mod_conference", NULL, 
+				conference->ivr_dtmf_timeout, conference->ivr_input_timeout, NULL, NULL, NULL);
 
 		controls = switch_channel_get_variable(channel, "conference_controls");
 
@@ -6511,6 +6514,8 @@ static conference_obj_t *conference_new(char *name, conf_xml_cfg_t cfg, switch_c
 	uint32_t rate = 8000, interval = 20;
 	int comfort_noise_level = 0;
 	int pin_retries = 3;
+	int ivr_dtmf_timeout = 500;
+	int ivr_input_timeout = 0;
 	char *suppress_events = NULL;
 	char *verbose_events = NULL;
 	char *auto_record = NULL;
@@ -6668,6 +6673,18 @@ static conference_obj_t *conference_new(char *name, conf_xml_cfg_t cfg, switch_c
 				caller_id_number = val;
 			} else if (!strcasecmp(var, "caller-controls") && !zstr(val)) {
 				caller_controls = val;
+                       } else if (!strcasecmp(var, "ivr-dtmf-timeout") && !zstr(val)) {
+                               ivr_dtmf_timeout = atoi(val);
+                               if (ivr_dtmf_timeout < 500) {
+                                       switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "not very smart value for ivr-dtmf-timeout found (%d), defaulting to 500ms\n", ivr_dtmf_timeout);
+                                       ivr_dtmf_timeout = 500;
+                               }
+                       } else if (!strcasecmp(var, "ivr-input-timeout") && !zstr(val)) {
+                               ivr_input_timeout = atoi(val);
+                               if (ivr_input_timeout != 0 && ivr_input_timeout < 500) {
+                                       switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "not very smart value for ivr-input-timeout found (%d), defaulting to 500ms\n", ivr_input_timeout);
+                                       ivr_input_timeout = 5000;
+                               }
 			} else if (!strcasecmp(var, "moderator-controls") && !zstr(val)) {
 				moderator_controls = val;
 			} else if (!strcasecmp(var, "comfort-noise") && !zstr(val)) {
@@ -6900,6 +6917,8 @@ static conference_obj_t *conference_new(char *name, conf_xml_cfg_t cfg, switch_c
 
 	conference->rate = rate;
 	conference->interval = interval;
+	conference->ivr_dtmf_timeout = ivr_dtmf_timeout;
+	conference->ivr_input_timeout = ivr_input_timeout;
 
 	conference->eflags = 0xFFFFFFFF;
 	if (!zstr(suppress_events)) {
