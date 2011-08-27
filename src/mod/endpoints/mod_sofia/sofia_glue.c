@@ -496,7 +496,7 @@ void sofia_glue_set_local_sdp(private_object_t *tech_pvt, const char *ip, switch
 
 		switch_snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " %d", tech_pvt->pt);
 
-		if (tech_pvt->dtmf_type == DTMF_2833 && tech_pvt->te > 95) {
+		if ((tech_pvt->dtmf_type == DTMF_2833 || sofia_test_pflag(tech_pvt->profile, PFLAG_LIBERAL_DTMF) || sofia_test_flag(tech_pvt, TFLAG_LIBERAL_DTMF)) && tech_pvt->te > 95) {
 			switch_snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " %d", tech_pvt->te);
 		}
 		
@@ -658,6 +658,8 @@ void sofia_glue_set_local_sdp(private_object_t *tech_pvt, const char *ip, switch
 
 					if (ov_fmtp) {
 						pass_fmtp = ov_fmtp;
+					} else {
+						pass_fmtp = switch_channel_get_variable(tech_pvt->channel, "sip_video_fmtp");
 					}
 				}
 
@@ -2107,14 +2109,11 @@ switch_status_t sofia_glue_do_invite(switch_core_session_t *session)
 		if (zstr(tech_pvt->invite_contact)) {
 			const char *contact;
 			if ((contact = switch_channel_get_variable(channel, "sip_contact_user"))) {
-				char *ip_addr;
+				char *ip_addr = tech_pvt->profile->sipip;
 				char *ipv6;
 
-				if (!zstr(tech_pvt->remote_ip) && sofia_glue_check_nat(tech_pvt->profile, tech_pvt->remote_ip)) {
-					ip_addr = (switch_check_network_list_ip(tech_pvt->remote_ip, tech_pvt->profile->local_network))
-						? tech_pvt->profile->sipip : tech_pvt->profile->extsipip;
-				} else {
-					ip_addr = tech_pvt->profile->extsipip ? tech_pvt->profile->extsipip : tech_pvt->profile->sipip;
+				if ( !zstr(tech_pvt->remote_ip) && sofia_glue_check_nat(tech_pvt->profile, tech_pvt->remote_ip ) ) {
+					ip_addr = tech_pvt->profile->extsipip;
 				}
 
 				ipv6 = strchr(ip_addr, ':');
@@ -2366,6 +2365,7 @@ switch_status_t sofia_glue_do_invite(switch_core_session_t *session)
 	extra_headers = sofia_glue_get_extra_headers(channel, SOFIA_SIP_HEADER_PREFIX);
 
 	session_timeout = tech_pvt->profile->session_timeout;
+
 	if ((val = switch_channel_get_variable(channel, SOFIA_SESSION_TIMEOUT))) {
 		int v_session_timeout = atoi(val);
 		if (v_session_timeout >= 0) {
@@ -2420,10 +2420,12 @@ switch_status_t sofia_glue_do_invite(switch_core_session_t *session)
 		sofia_clear_flag(tech_pvt, TFLAG_ENABLE_SOA);
 	}
 
-	if (sofia_test_flag(tech_pvt, TFLAG_RECOVERED)) {
-		session_timeout = 0;
+	if ((tech_pvt->session_timeout = session_timeout)) {
+		tech_pvt->session_refresher = switch_channel_direction(channel) == SWITCH_CALL_DIRECTION_OUTBOUND ? nua_local_refresher : nua_remote_refresher;
+	} else {
+		tech_pvt->session_refresher = nua_no_refresher;
 	}
-
+	
 	if (sofia_use_soa(tech_pvt)) {
 		nua_invite(tech_pvt->nh,
 				   NUTAG_AUTOANSWER(0),
@@ -2431,8 +2433,8 @@ switch_status_t sofia_glue_do_invite(switch_core_session_t *session)
 				   //TAG_IF(!zstr(tech_pvt->local_sdp_str), NUTAG_AUTOACK(1)),
 				   // The code above is breaking things...... grrr WE need this because we handle our own acks and there are 3pcc cases in there too
 				   NUTAG_AUTOACK(0),
-				   NUTAG_SESSION_TIMER(session_timeout),
-				   NUTAG_SESSION_REFRESHER(session_timeout ? nua_local_refresher : nua_no_refresher),
+				   NUTAG_SESSION_TIMER(tech_pvt->session_timeout),
+				   NUTAG_SESSION_REFRESHER(tech_pvt->session_refresher),
 				   TAG_IF(sofia_test_flag(tech_pvt, TFLAG_RECOVERED), NUTAG_INVITE_TIMER(UINT_MAX)),
 				   TAG_IF(invite_full_from, SIPTAG_FROM_STR(invite_full_from)),
 				   TAG_IF(invite_full_to, SIPTAG_TO_STR(invite_full_to)),
@@ -2465,8 +2467,8 @@ switch_status_t sofia_glue_do_invite(switch_core_session_t *session)
 		nua_invite(tech_pvt->nh,
 				   NUTAG_AUTOANSWER(0),
 				   NUTAG_AUTOACK(0),
-				   NUTAG_SESSION_TIMER(session_timeout),
-				   TAG_IF(session_timeout, NUTAG_SESSION_REFRESHER(nua_remote_refresher)),
+				   NUTAG_SESSION_TIMER(tech_pvt->session_timeout),
+				   NUTAG_SESSION_REFRESHER(tech_pvt->session_refresher),
 				   TAG_IF(sofia_test_flag(tech_pvt, TFLAG_RECOVERED), NUTAG_INVITE_TIMER(UINT_MAX)),
 				   TAG_IF(invite_full_from, SIPTAG_FROM_STR(invite_full_from)),
 				   TAG_IF(invite_full_to, SIPTAG_TO_STR(invite_full_to)),
@@ -3989,7 +3991,6 @@ static switch_t38_options_t *tech_process_udptl(private_object_t *tech_pvt, sdp_
 {
 	switch_t38_options_t *t38_options = switch_channel_get_private(tech_pvt->channel, "t38_options");
 	sdp_attribute_t *attr;
-	const char *var;
 
 	if (!t38_options) {
 		t38_options = switch_core_session_alloc(tech_pvt->session, sizeof(switch_t38_options_t));
@@ -4069,20 +4070,8 @@ static switch_t38_options_t *tech_process_udptl(private_object_t *tech_pvt, sdp_
 	switch_channel_set_private(tech_pvt->channel, "t38_options", t38_options);
 	switch_channel_set_app_flag_key("T38", tech_pvt->channel, CF_APP_T38);
 
-	if ((var = switch_channel_get_variable(tech_pvt->channel, "sip_execute_on_image"))) {
-		char *app, *arg = NULL;
-		app = switch_core_session_strdup(tech_pvt->session, var);
-		
-		if (strstr(app, "::")) {
-			switch_core_session_execute_application_async(tech_pvt->session, app, arg);
-		} else {
-			if ((arg = strchr(app, ' '))) {
-				*arg++ = '\0';
-			}
-			
-			switch_core_session_execute_application(tech_pvt->session, app, arg);
-		}		
-	}
+	switch_channel_execute_on(tech_pvt->channel, "sip_execute_on_image");
+	switch_channel_api_on(tech_pvt->channel, "sip_api_on_image");
 
 	return t38_options;
 }
@@ -4608,7 +4597,7 @@ uint8_t sofia_glue_negotiate_sdp(switch_core_session_t *session, const char *r_s
 		greed:
 			x = 0;
 
-			if (tech_pvt->rm_encoding) {	// && !sofia_test_flag(tech_pvt, TFLAG_REINVITE)) {
+			if (tech_pvt->rm_encoding && !(sofia_test_pflag(tech_pvt->profile, PFLAG_LIBERAL_DTMF) || sofia_test_flag(tech_pvt, TFLAG_LIBERAL_DTMF))) {	// && !sofia_test_flag(tech_pvt, TFLAG_REINVITE)) {
 				char *remote_host = tech_pvt->remote_sdp_audio_ip;
 				switch_port_t remote_port = tech_pvt->remote_sdp_audio_port;
 				int same = 0;
@@ -4833,6 +4822,12 @@ uint8_t sofia_glue_negotiate_sdp(switch_core_session_t *session, const char *r_s
 				}
 			}
 
+			if (!best_te && (sofia_test_pflag(tech_pvt->profile, PFLAG_LIBERAL_DTMF) || sofia_test_flag(tech_pvt, TFLAG_LIBERAL_DTMF))) {
+				switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, 
+								  "No 2833 in SDP. Liberal DTMF mode adding %d as telephone-event.\n", tech_pvt->profile->te);
+				best_te = tech_pvt->profile->te;
+			}
+
 			if (best_te) {
 				if (switch_channel_direction(channel) == SWITCH_CALL_DIRECTION_OUTBOUND) {
 					te = tech_pvt->te = (switch_payload_t) best_te;
@@ -4849,10 +4844,17 @@ uint8_t sofia_glue_negotiate_sdp(switch_core_session_t *session, const char *r_s
 					}
 				}
 			} else {
-				switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "Disable 2833 dtmf\n");
-				switch_channel_set_variable(tech_pvt->channel, "dtmf_type", "none");
-				tech_pvt->dtmf_type = DTMF_NONE;
-				te = tech_pvt->recv_te = 0;
+				/* by default, use SIP INFO if 2833 is not in the SDP */
+				if (!switch_false(switch_channel_get_variable(channel, "sip_info_when_no_2833"))) {
+					switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "No 2833 in SDP.  Disable 2833 dtmf and switch to INFO\n");
+					switch_channel_set_variable(tech_pvt->channel, "dtmf_type", "info");
+					tech_pvt->dtmf_type = DTMF_INFO;
+					te = tech_pvt->recv_te = tech_pvt->te = 0;
+				} else {
+					switch_channel_set_variable(tech_pvt->channel, "dtmf_type", "none");
+					tech_pvt->dtmf_type = DTMF_NONE;
+					te = tech_pvt->recv_te = tech_pvt->te = 0;
+				}
 			}
 
 			
@@ -6319,7 +6321,7 @@ void sofia_glue_free_destination(sofia_destination_t *dst)
 }
 
 switch_status_t sofia_glue_send_notify(sofia_profile_t *profile, const char *user, const char *host, const char *event, const char *contenttype,
-									   const char *body, const char *o_contact, const char *network_ip, const char *call_id)
+									   const char *body, const char *o_contact, const char *network_ip)
 {
 	char *id = NULL;
 	nua_handle_t *nh;
@@ -6376,7 +6378,6 @@ switch_status_t sofia_glue_send_notify(sofia_profile_t *profile, const char *use
 			   TAG_IF(dst->route_uri, NUTAG_PROXY(route_uri)), TAG_IF(dst->route, SIPTAG_ROUTE_STR(dst->route)),
 			   TAG_IF(user_via, SIPTAG_VIA_STR(user_via)),
 			   TAG_IF(event, SIPTAG_EVENT_STR(event)),
-			   TAG_IF(call_id, SIPTAG_CALL_ID_STR(call_id)),
 			   TAG_IF(contenttype, SIPTAG_CONTENT_TYPE_STR(contenttype)), TAG_IF(body, SIPTAG_PAYLOAD_STR(body)), TAG_END());
 
 	switch_safe_free(contact);
@@ -6546,6 +6547,14 @@ void sofia_glue_parse_rtp_bugs(switch_rtp_bug_flag_t *flag_pole, const char *str
 
 	if (switch_stristr("~IGNORE_DTMF_DURATION", str)) {
 		*flag_pole &= ~RTP_BUG_IGNORE_DTMF_DURATION;
+	}
+
+	if (switch_stristr("PAUSE_BETWEEN_DTMF", str)) {
+		*flag_pole |= RTP_BUG_PAUSE_BETWEEN_DTMF;
+	}
+
+	if (switch_stristr("~PAUSE_BETWEEN_DTMF", str)) {
+		*flag_pole &= ~RTP_BUG_PAUSE_BETWEEN_DTMF;
 	}
 }
 

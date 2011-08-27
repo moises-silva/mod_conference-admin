@@ -111,6 +111,8 @@ SWITCH_DECLARE(switch_status_t) switch_ivr_parse_all_events(switch_core_session_
 SWITCH_DECLARE(switch_status_t) switch_ivr_parse_next_event(switch_core_session_t *session);
 SWITCH_DECLARE(switch_status_t) switch_ivr_parse_all_messages(switch_core_session_t *session);
 SWITCH_DECLARE(switch_status_t) switch_ivr_parse_all_signal_data(switch_core_session_t *session);
+SWITCH_DECLARE(switch_status_t) switch_ivr_process_indications(switch_core_session_t *session, switch_core_session_message_t *message);
+
 /*!
   \brief Wait for time to pass for a specified number of milliseconds
   \param session the session to wait for.
@@ -407,7 +409,8 @@ SWITCH_DECLARE(switch_status_t) switch_play_and_get_digits(switch_core_session_t
 														   const char *bad_input_audio_file,
 														   const char *var_name, char *digit_buffer, uint32_t digit_buffer_length,
 														   const char *digits_regex,
-														   uint32_t digit_timeout);
+														   uint32_t digit_timeout,
+														   const char *transfer_on_failure);
 
 SWITCH_DECLARE(switch_status_t) switch_ivr_speak_text_handle(switch_core_session_t *session,
 															 switch_speech_handle_t *sh,

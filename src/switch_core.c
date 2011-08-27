@@ -81,6 +81,7 @@ static void send_heartbeat(void)
 								duration.ms, duration.ms == 1 ? "" : "s", duration.mms, duration.mms == 1 ? "" : "s");
 
 		switch_event_add_header(event, SWITCH_STACK_BOTTOM, "Session-Count", "%u", switch_core_session_count());
+		switch_event_add_header(event, SWITCH_STACK_BOTTOM, "Max-Sessions", "%u", switch_core_session_limit(0));
 		switch_event_add_header(event, SWITCH_STACK_BOTTOM, "Session-Per-Sec", "%u", runtime.sps);
 		switch_event_add_header(event, SWITCH_STACK_BOTTOM, "Session-Since-Startup", "%" SWITCH_SIZE_T_FMT, switch_core_session_id() - 1);
 		switch_event_add_header(event, SWITCH_STACK_BOTTOM, "Idle-CPU", "%f", switch_core_idle_cpu());
@@ -1357,6 +1358,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_init(switch_core_flag_t flags, switc
 	runtime.dummy_cng_frame.buflen = sizeof(runtime.dummy_data);
 	switch_set_flag((&runtime.dummy_cng_frame), SFF_CNG);
 	switch_set_flag((&runtime), SCF_AUTO_SCHEMAS);
+	switch_set_flag((&runtime), SCF_CLEAR_SQL);
 
 	switch_set_flag((&runtime), SCF_NO_NEW_SESSIONS);
 	runtime.hard_log_level = SWITCH_LOG_DEBUG;
@@ -1480,42 +1482,6 @@ SWITCH_DECLARE(switch_status_t) switch_core_init(switch_core_flag_t flags, switc
 	return SWITCH_STATUS_SUCCESS;
 }
 
-
-#ifdef SIGQUIT
-static void handle_SIGQUIT(int sig)
-{
-	if (sig);
-	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG1, "Sig Quit!\n");
-	return;
-}
-#endif
-
-#ifdef SIGPIPE
-static void handle_SIGPIPE(int sig)
-{
-	if (sig);
-	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG1, "Sig Pipe!\n");
-	return;
-}
-#endif
-
-#ifdef SIGPOLL
-static void handle_SIGPOLL(int sig)
-{
-	if (sig);
-	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG1, "Sig Poll!\n");
-	return;
-}
-#endif
-
-#ifdef SIGIO
-static void handle_SIGIO(int sig)
-{
-	if (sig);
-	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG1, "Sig I/O!\n");
-	return;
-}
-#endif
 
 #ifdef TRAP_BUS
 static void handle_SIGBUS(int sig)
@@ -1673,6 +1639,12 @@ static void switch_load_core_config(const char *file)
 						switch_set_flag((&runtime), SCF_AUTO_SCHEMAS);
 					} else {
 						switch_clear_flag((&runtime), SCF_AUTO_SCHEMAS);
+					}
+				} else if (!strcasecmp(var, "auto-clear-sql")) {
+					if (switch_true(val)) {
+						switch_set_flag((&runtime), SCF_CLEAR_SQL);
+					} else {
+						switch_clear_flag((&runtime), SCF_CLEAR_SQL);
 					}
 				} else if (!strcasecmp(var, "enable-early-hangup") && switch_true(val)) {
 					switch_set_flag((&runtime), SCF_EARLY_HANGUP);
@@ -1898,17 +1870,18 @@ SWITCH_DECLARE(void) switch_core_set_signal_handlers(void)
 {
 	/* set signal handlers */
 	signal(SIGINT, SIG_IGN);
+
 #ifdef SIGPIPE
-	signal(SIGPIPE, handle_SIGPIPE);
+	signal(SIGPIPE, SIG_IGN);
 #endif
 #ifdef SIGQUIT
-	signal(SIGQUIT, handle_SIGQUIT);
+	signal(SIGQUIT, SIG_IGN);
 #endif
 #ifdef SIGPOLL
-	signal(SIGPOLL, handle_SIGPOLL);
+	signal(SIGPOLL, SIG_IGN);
 #endif
 #ifdef SIGIO
-	signal(SIGIO, handle_SIGIO);
+	signal(SIGIO, SIG_IGN);
 #endif
 #ifdef TRAP_BUS
 	signal(SIGBUS, handle_SIGBUS);

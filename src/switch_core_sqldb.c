@@ -852,6 +852,10 @@ SWITCH_DECLARE(switch_bool_t) switch_cache_db_test_reactive(switch_cache_db_hand
 	switch_bool_t r = SWITCH_TRUE;
 	switch_mutex_t *io_mutex = dbh->io_mutex;
 
+	if (!switch_test_flag((&runtime), SCF_CLEAR_SQL)) {
+		return SWITCH_TRUE;
+	}
+
 	if (!switch_test_flag((&runtime), SCF_AUTO_SCHEMAS)) {
 		switch_cache_db_execute_sql(dbh, (char *)test_sql, NULL);
 		return SWITCH_TRUE;
@@ -996,7 +1000,7 @@ static void *SWITCH_THREAD_FUNC switch_core_sql_thread(switch_thread_t *thread, 
 					trans = 1;
 				}
 
-				if (len + newlen > sql_len) {
+				if (len + newlen + 1 > sql_len) {
 					int new_mlen = len + newlen + 10240;
 					
 					if (new_mlen < runtime.max_sql_buffer_len) {
@@ -1894,7 +1898,7 @@ switch_status_t switch_core_sqldb_start(switch_memory_pool_t *pool, switch_bool_
 
 	switch (dbh->type) {
 	case SCDB_TYPE_ODBC:
-		{
+		if (switch_test_flag((&runtime), SCF_CLEAR_SQL)) {
 			char sql[512] = "";
 			char *tables[] = { "channels", "calls", "interfaces", "tasks", NULL };
 			int i;
@@ -1935,9 +1939,9 @@ switch_status_t switch_core_sqldb_start(switch_memory_pool_t *pool, switch_bool_
 	case SCDB_TYPE_ODBC:
 		{
 			char *err;
-			switch_cache_db_test_reactive(dbh, "select call_uuid, read_bit_rate from channels", "DROP TABLE channels", create_channels_sql);
-			switch_cache_db_test_reactive(dbh, "select * from detailed_calls", "DROP VIEW detailed_calls", detailed_calls_sql);
-			switch_cache_db_test_reactive(dbh, "select * from basic_calls", "DROP VIEW basic_call", basic_calls_sql);
+			switch_cache_db_test_reactive(dbh, "select call_uuid, read_bit_rate, sent_callee_name from channels", "DROP TABLE channels", create_channels_sql);
+			switch_cache_db_test_reactive(dbh, "select * from detailed_calls where sent_callee_name=''", "DROP VIEW detailed_calls", detailed_calls_sql);
+			switch_cache_db_test_reactive(dbh, "select * from basic_calls where sent_callee_name=''", "DROP VIEW basic_calls", basic_calls_sql);
 			if (runtime.odbc_dbtype == DBTYPE_DEFAULT) {
 				switch_cache_db_test_reactive(dbh, "select call_uuid from calls", "DROP TABLE calls", create_calls_sql);
 			} else {

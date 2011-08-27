@@ -509,7 +509,7 @@ SWITCH_DECLARE_CONSTRUCTOR CoreSession::CoreSession(char *nuuid, CoreSession *a_
 		other_channel = switch_core_session_get_channel(a_leg->session);
 	}
 
-	if (!strchr(nuuid, '/') && (session = switch_core_session_locate(nuuid))) {
+	if (!strchr(nuuid, '/') && (session = switch_core_session_force_locate(nuuid))) {
 		uuid = strdup(nuuid);
 		channel = switch_core_session_get_channel(session);
 		allocated = 1;
@@ -825,7 +825,8 @@ SWITCH_DECLARE(char *) CoreSession::playAndGetDigits(int min_digits,
 													 char *bad_input_audio_files,
 													 char *digits_regex,
 													 const char *var_name,
-													 int digit_timeout)
+													 int digit_timeout,
+													 const char *transfer_on_failure)
 {
     switch_status_t status;
 	sanity_check((char *)"");
@@ -844,7 +845,8 @@ SWITCH_DECLARE(char *) CoreSession::playAndGetDigits(int min_digits,
 										 dtmf_buf, 
 										 sizeof(dtmf_buf), 
 										 digits_regex,
-										 (uint32_t) digit_timeout);
+										 (uint32_t) digit_timeout,
+										 transfer_on_failure);
 
 	end_allow_threads();
 	return dtmf_buf;

@@ -2137,6 +2137,7 @@ static switch_bool_t inband_dtmf_callback(switch_media_bug_t *bug, void *user_da
 					switch_dtmf_t dtmf;
 					dtmf.digit = *p;
 					dtmf.duration = switch_core_default_dtmf_duration(0);
+					dtmf.source = SWITCH_DTMF_INBAND_AUDIO;
 					switch_channel_queue_dtmf(channel, &dtmf);
 					p++;
 				}
@@ -2327,18 +2328,20 @@ static switch_bool_t inband_dtmf_generate_callback(switch_media_bug_t *bug, void
 			if (!switch_buffer_inuse(pvt->audio_buffer)) {
 				if (switch_queue_trypop(pvt->digit_queue, &pop) == SWITCH_STATUS_SUCCESS) {
 					switch_dtmf_t *dtmf = (switch_dtmf_t *) pop;
-					char buf[2] = "";
-					int duration = dtmf->duration;
+					if (dtmf->source != SWITCH_DTMF_INBAND_AUDIO) {
+						char buf[2] = "";
+						int duration = dtmf->duration;
 
-					buf[0] = dtmf->digit;
-					if (duration > 8000) {
-						duration = 4000;
-						switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(switch_core_media_bug_get_session(bug)),
+						buf[0] = dtmf->digit;
+						if (duration > 8000) {
+							duration = 4000;
+							switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(switch_core_media_bug_get_session(bug)),
 										  SWITCH_LOG_WARNING, "%s Truncating ridiculous DTMF duration %d ms to 1/2 second.\n",
 										  switch_channel_get_name(switch_core_session_get_channel(pvt->session)), dtmf->duration / 8);
+						}
+						pvt->ts.duration = duration;
+						teletone_run(&pvt->ts, buf);
 					}
-					pvt->ts.duration = duration;
-					teletone_run(&pvt->ts, buf);
 					free(pop);
 				}
 			}
@@ -2458,6 +2461,8 @@ static switch_status_t tone_on_dtmf(switch_core_session_t *session, const switch
 		cont->list[i].callback(cont->session, cont->list[i].app, cont->list[i].data);
 	} else {
 		switch_channel_execute_on(switch_core_session_get_channel(cont->session), SWITCH_CHANNEL_EXECUTE_ON_TONE_DETECT_VARIABLE);
+		switch_channel_api_on(switch_core_session_get_channel(cont->session), SWITCH_CHANNEL_API_ON_TONE_DETECT_VARIABLE);
+
 		if (cont->list[i].app) {
 			switch_core_session_execute_application_async(cont->session, cont->list[i].app, cont->list[i].data);
 		}
@@ -3166,6 +3171,7 @@ static void *SWITCH_THREAD_FUNC speech_thread(switch_thread_t *thread, void *obj
 						switch_dtmf_t dtmf;
 						dtmf.digit = c;
 						dtmf.duration = switch_core_default_dtmf_duration(0);
+						dtmf.source = SWITCH_DTMF_INBAND_AUDIO;
 						switch_log_printf(SWITCH_CHANNEL_CHANNEL_LOG(channel), SWITCH_LOG_DEBUG, "Queue speech detected dtmf %c\n", c);
 						switch_channel_queue_dtmf(channel, &dtmf);
 					}

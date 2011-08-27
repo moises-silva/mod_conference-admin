@@ -45,7 +45,7 @@ struct switch_event_node {
 	/*! the event id enumeration to bind to */
 	switch_event_types_t event_id;
 	/*! the event subclass to bind to for custom events */
-	switch_event_subclass_t *subclass;
+	char *subclass_name;
 	/*! a callback function to execute when the event is triggered */
 	switch_event_callback_t callback;
 	/*! private data */
@@ -205,28 +205,28 @@ static int switch_events_match(switch_event_t *event, switch_event_node_t *node)
 	if (node->event_id == SWITCH_EVENT_ALL) {
 		match++;
 
-		if (!node->subclass) {
+		if (!node->subclass_name) {
 			return match;
 		}
 	}
 
 	if (match || event->event_id == node->event_id) {
 
-		if (event->subclass_name && node->subclass) {
-			if (!strncasecmp(node->subclass->name, "file:", 5)) {
+		if (event->subclass_name && node->subclass_name) {
+			if (!strncasecmp(node->subclass_name, "file:", 5)) {
 				char *file_header;
 				if ((file_header = switch_event_get_header(event, "file")) != 0) {
-					match = strstr(node->subclass->name + 5, file_header) ? 1 : 0;
+					match = strstr(node->subclass_name + 5, file_header) ? 1 : 0;
 				}
-			} else if (!strncasecmp(node->subclass->name, "func:", 5)) {
+			} else if (!strncasecmp(node->subclass_name, "func:", 5)) {
 				char *func_header;
 				if ((func_header = switch_event_get_header(event, "function")) != 0) {
-					match = strstr(node->subclass->name + 5, func_header) ? 1 : 0;
+					match = strstr(node->subclass_name + 5, func_header) ? 1 : 0;
 				}
-			} else if (event->subclass_name && node->subclass->name) {
-				match = strstr(event->subclass_name, node->subclass->name) ? 1 : 0;
+			} else if (event->subclass_name && node->subclass_name) {
+				match = strstr(event->subclass_name, node->subclass_name) ? 1 : 0;
 			}
-		} else if ((event->subclass_name && !node->subclass) || (!event->subclass_name && !node->subclass)) {
+		} else if ((event->subclass_name && !node->subclass_name) || (!event->subclass_name && !node->subclass_name)) {
 			match = 1;
 		} else {
 			match = 0;
@@ -333,17 +333,11 @@ static void *SWITCH_THREAD_FUNC switch_event_thread(switch_thread_t *thread, voi
 
 
 			if (++loops > 2) {
-				uint32_t last_sps = 0, sess_count = switch_core_session_count();
 				if (auto_pause) {
 					switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_CRIT, "Event system *still* overloading.\n");
 				} else {
-					switch_core_session_ctl(SCSC_LAST_SPS, &last_sps);
-					last_sps = (uint32_t) (float) (last_sps * 0.75f);
-					sess_count = (uint32_t) (float) (sess_count * 0.75f);
 					switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_CRIT, 
-									  "Event system overloading. Taking a 10 second break, Reducing max_sessions to %d %dsps\n", sess_count, last_sps);
-					switch_core_session_limit(sess_count);
-					switch_core_session_ctl(SCSC_SPS, &last_sps);
+									  "Event system overloading. Taking a 10 second break\n");
 					auto_pause = 10;
 					switch_core_session_ctl(SCSC_PAUSE_INBOUND, &auto_pause);
 				}
@@ -1732,7 +1726,9 @@ SWITCH_DECLARE(switch_status_t) switch_event_bind_removable(const char *id, swit
 		/* <LOCKED> ----------------------------------------------- */
 		event_node->id = DUP(id);
 		event_node->event_id = event;
-		event_node->subclass = subclass;
+		if (subclass_name) {
+			event_node->subclass_name = DUP(subclass_name);
+		}
 		event_node->callback = callback;
 		event_node->user_data = user_data;
 
@@ -1786,6 +1782,7 @@ SWITCH_DECLARE(switch_status_t) switch_event_unbind_callback(switch_event_callba
 				}
 
 				switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_NOTICE, "Event Binding deleted for %s:%s\n", n->id, switch_event_name(n->event_id));
+				FREE(n->subclass_name);
 				FREE(n->id);
 				FREE(n);
 				status = SWITCH_STATUS_SUCCESS;
@@ -1825,7 +1822,7 @@ SWITCH_DECLARE(switch_status_t) switch_event_unbind(switch_event_node_t **node)
 				EVENT_NODES[n->event_id] = n->next;
 			}
 			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_NOTICE, "Event Binding deleted for %s:%s\n", n->id, switch_event_name(n->event_id));
-			n->subclass = NULL;
+			FREE(n->subclass_name);
 			FREE(n->id);
 			FREE(n);
 			*node = NULL;

@@ -48,7 +48,9 @@ extern su_log_t nth_server_log[];
 extern su_log_t nua_log[];
 extern su_log_t soa_log[];
 extern su_log_t sresolv_log[];
+#ifdef HAVE_SOFIA_STUN
 extern su_log_t stun_log[];
+#endif
 extern su_log_t su_log_default[];
 
 static void config_sofia_profile_urls(sofia_profile_t * profile);
@@ -1145,6 +1147,7 @@ void *SWITCH_THREAD_FUNC sofia_msg_thread_run(switch_thread_t *thread, void *obj
 	while(switch_queue_pop(q, &pop) == SWITCH_STATUS_SUCCESS && pop) {
 		sofia_dispatch_event_t *de = (sofia_dispatch_event_t *) pop;
 		sofia_process_dispatch_event(&de);
+		switch_cond_next();
 	}
 
 	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_CONSOLE, "MSG Thread Ended\n");
@@ -1175,7 +1178,7 @@ static void sofia_msg_thread_start(int idx)
 
 				switch_threadattr_create(&thd_attr, mod_sofia_globals.pool);
 				switch_threadattr_stacksize_set(thd_attr, SWITCH_THREAD_STACKSIZE);
-				switch_threadattr_priority_increase(thd_attr);
+				//switch_threadattr_priority_increase(thd_attr);
 				switch_thread_create(&mod_sofia_globals.msg_queue_thread[i], 
 									 thd_attr, 
 									 sofia_msg_thread_run, 
@@ -1254,7 +1257,6 @@ void sofia_event_callback(nua_event_t event,
 
 		if (!zstr(sofia_private->uuid)) {
 			if ((session = switch_core_session_locate(sofia_private->uuid))) {
-				
 				if (switch_core_session_running(session)) {
 					switch_core_session_queue_signal_data(session, de);
 				} else {
@@ -1788,6 +1790,8 @@ void *SWITCH_THREAD_FUNC sofia_profile_thread_run(switch_thread_t *thread, void 
 									 NTATAG_USE_SRV(0)),
 							  TAG_IF(sofia_test_pflag(profile, PFLAG_DISABLE_NAPTR),
 									 NTATAG_USE_NAPTR(0)),
+							  TAG_IF(sofia_test_pflag(profile, PFLAG_DISABLE_SRV503),
+									 NTATAG_SRV_503(0)),									 
 							  NTATAG_DEFAULT_PROXY(profile->outbound_proxy),
 							  NTATAG_SERVER_RPORT(profile->server_rport_level),
 							  NTATAG_CLIENT_RPORT(profile->client_rport_level),
@@ -2076,8 +2080,10 @@ static su_log_t *sofia_get_logger(const char *name)
 		return soa_log;
 	} else if (!strcasecmp(name, "sresolv")) {
 		return sresolv_log;
+#ifdef HAVE_SOFIA_STUN
 	} else if (!strcasecmp(name, "stun")) {
 		return stun_log;
+#endif
 	} else if (!strcasecmp(name, "default")) {
 		return su_log_default;
 	} else {
@@ -2104,7 +2110,9 @@ switch_status_t sofia_set_loglevel(const char *name, int level)
 		su_log_set_level(nua_log, level);
 		su_log_set_level(soa_log, level);
 		su_log_set_level(sresolv_log, level);
+#ifdef HAVE_SOFIA_STUN
 		su_log_set_level(stun_log, level);
+#endif
 		return SWITCH_STATUS_SUCCESS;
 	}
 
@@ -2701,6 +2709,12 @@ switch_status_t reconfig_sofia(sofia_profile_t *profile)
 				mod_sofia_globals.debug_sla = atoi(val);
 			} else if (!strcasecmp(var, "auto-restart")) {
 				mod_sofia_globals.auto_restart = switch_true(val);
+			} else if (!strcasecmp(var, "reg-deny-binding-fetch-and-no-lookup")) {          /* backwards compatibility */
+				mod_sofia_globals.reg_deny_binding_fetch_and_no_lookup = switch_true(val);  /* remove when noone complains about the extra lookup */
+				if (switch_true(val)) {
+					switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "Enabling reg-deny-binding-fetch-and-no-lookup - this functionality is "
+					                                         "deprecated and will be removed - let FS devs know if you think it should stay\n");
+				}
 			} else if (!strcasecmp(var, "rewrite-multicasted-fs-path")) {
 				if( (!strcasecmp(val, "to_host")) || (!strcasecmp(val, "1")) ) {
 					/* old behaviour */
@@ -3355,7 +3369,9 @@ switch_status_t config_sofia(int reload, char *profile_name)
 		su_log_redirect(nua_log, logger, NULL);
 		su_log_redirect(soa_log, logger, NULL);
 		su_log_redirect(sresolv_log, logger, NULL);
+#ifdef HAVE_SOFIA_STUN
 		su_log_redirect(stun_log, logger, NULL);
+#endif
 	}
 	
 	if (!zstr(profile_name) && (profile = sofia_glue_find_profile(profile_name))) {
@@ -3376,6 +3392,7 @@ switch_status_t config_sofia(int reload, char *profile_name)
 	}
 
 	mod_sofia_globals.auto_restart = SWITCH_TRUE;
+	mod_sofia_globals.reg_deny_binding_fetch_and_no_lookup = SWITCH_FALSE; /* handle backwards compatilibity - by default use new behavior */
 	mod_sofia_globals.rewrite_multicasted_fs_path = SWITCH_FALSE;
 
 	if ((settings = switch_xml_child(cfg, "global_settings"))) {
@@ -3392,6 +3409,12 @@ switch_status_t config_sofia(int reload, char *profile_name)
 				mod_sofia_globals.debug_sla = atoi(val);
 			} else if (!strcasecmp(var, "auto-restart")) {
 				mod_sofia_globals.auto_restart = switch_true(val);
+			} else if (!strcasecmp(var, "reg-deny-binding-fetch-and-no-lookup")) {          /* backwards compatibility */
+				mod_sofia_globals.reg_deny_binding_fetch_and_no_lookup = switch_true(val);  /* remove when noone complains about the extra lookup */
+				if (switch_true(val)) {
+					switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "Enabling reg-deny-binding-fetch-and-no-lookup - this functionality is "
+					                                         "deprecated and will be removed - let FS devs know if you think it should stay\n");
+				}
 			} else if (!strcasecmp(var, "rewrite-multicasted-fs-path")) {
 				if( (!strcasecmp(val, "to_host")) || (!strcasecmp(val, "1")) ) {
 					/* old behaviour */
@@ -3486,6 +3509,7 @@ switch_status_t config_sofia(int reload, char *profile_name)
 				sofia_set_flag(profile, TFLAG_ENABLE_SOA);
 				sofia_set_pflag(profile, PFLAG_CID_IN_1XX);
 				profile->ndlb |= PFLAG_NDLB_ALLOW_NONDUP_SDP;
+				profile->te = 101;
 
 				for (param = switch_xml_child(settings, "param"); param; param = param->next) {
 					char *var = (char *) switch_xml_attr_soft(param, "name");
@@ -3940,6 +3964,10 @@ switch_status_t config_sofia(int reload, char *profile_name)
 						if (switch_true(val)) {
 							sofia_set_pflag(profile, PFLAG_DISABLE_NAPTR);
 						}
+					} else if (!strcasecmp(var, "disable-srv503")) {
+						if (switch_true(val)) {
+							sofia_set_pflag(profile, PFLAG_DISABLE_SRV503);
+						}						
 					} else if (!strcasecmp(var, "unregister-on-options-fail")) {
 						if (switch_true(val)) {
 							sofia_set_pflag(profile, PFLAG_UNREG_OPTIONS_FAIL);
@@ -6597,7 +6625,7 @@ void sofia_handle_sip_i_info(nua_t *nua, sofia_profile_t *profile, nua_handle_t 
 	const char *signal_ptr;
 	const char *rec_header;
 	const char *clientcode_header;
-	switch_dtmf_t dtmf = { 0, switch_core_default_dtmf_duration(0) };
+	switch_dtmf_t dtmf = { 0, switch_core_default_dtmf_duration(0), 0, SWITCH_DTMF_ENDPOINT };
 	switch_event_t *event;
 	private_object_t *tech_pvt = NULL;
 
@@ -6736,35 +6764,37 @@ void sofia_handle_sip_i_info(nua_t *nua, sofia_profile_t *profile, nua_handle_t 
 				goto end;
 			}
 
-			if (dtmf.digit && (tech_pvt->dtmf_type == DTMF_INFO || 
-							   sofia_test_pflag(tech_pvt->profile, PFLAG_LIBERAL_DTMF) || sofia_test_flag(tech_pvt, TFLAG_LIBERAL_DTMF))) {
-				/* queue it up */
-				switch_channel_queue_dtmf(channel, &dtmf);
+			if (dtmf.digit) {
+				if (tech_pvt->dtmf_type == DTMF_INFO || 
+						sofia_test_pflag(tech_pvt->profile, PFLAG_LIBERAL_DTMF) || sofia_test_flag(tech_pvt, TFLAG_LIBERAL_DTMF)) {
+					/* queue it up */
+					switch_channel_queue_dtmf(channel, &dtmf);
 
-				/* print debug info */
-				switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "INFO DTMF(%c)\n", dtmf.digit);
+					/* print debug info */
+					switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "INFO DTMF(%c)\n", dtmf.digit);
 
-				if (switch_channel_test_flag(channel, CF_PROXY_MODE)) {
-					const char *uuid;
-					switch_core_session_t *session_b;
+					if (switch_channel_test_flag(channel, CF_PROXY_MODE)) {
+						const char *uuid;
+						switch_core_session_t *session_b;
 
-					if ((uuid = switch_channel_get_variable(channel, SWITCH_SIGNAL_BOND_VARIABLE)) && (session_b = switch_core_session_locate(uuid))) {
-						while (switch_channel_has_dtmf(channel)) {
-							switch_dtmf_t idtmf = { 0, 0 };
-							if (switch_channel_dequeue_dtmf(channel, &idtmf) == SWITCH_STATUS_SUCCESS) {
-								switch_core_session_send_dtmf(session_b, &idtmf);
+						if ((uuid = switch_channel_get_variable(channel, SWITCH_SIGNAL_BOND_VARIABLE)) && (session_b = switch_core_session_locate(uuid))) {
+							while (switch_channel_has_dtmf(channel)) {
+								switch_dtmf_t idtmf = { 0, 0 };
+								if (switch_channel_dequeue_dtmf(channel, &idtmf) == SWITCH_STATUS_SUCCESS) {
+									switch_core_session_send_dtmf(session_b, &idtmf);
+								}
 							}
+
+							switch_core_session_rwunlock(session_b);
 						}
-
-						switch_core_session_rwunlock(session_b);
 					}
-				}
 
-				/* Send 200 OK response */
-				nua_respond(nh, SIP_200_OK, NUTAG_WITH_THIS_MSG(de->data->e_msg), TAG_END());
-			} else {
-				switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_WARNING, 
-								  "IGNORE INFO DTMF(%c) (This channel was not configured to use INFO DTMF!)\n", dtmf.digit);
+					/* Send 200 OK response */
+					nua_respond(nh, SIP_200_OK, NUTAG_WITH_THIS_MSG(de->data->e_msg), TAG_END());
+				} else {
+					switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_WARNING, 
+									  "IGNORE INFO DTMF(%c) (This channel was not configured to use INFO DTMF!)\n", dtmf.digit);
+				}
 			}
 			goto end;
 		}
@@ -7424,6 +7454,7 @@ void sofia_handle_sip_i_invite(nua_t *nua, sofia_profile_t *profile, nua_handle_
 
 	if (sofia_glue_check_nat(profile, tech_pvt->remote_ip)) {
 		tech_pvt->user_via = sofia_glue_create_external_via(session, profile, tech_pvt->transport);
+		nua_set_hparams(tech_pvt->nh, SIPTAG_VIA_STR(tech_pvt->user_via), TAG_END());
 	}
 
 	if (sip->sip_contact && sip->sip_contact->m_url) {

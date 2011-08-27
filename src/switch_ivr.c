@@ -668,43 +668,51 @@ SWITCH_DECLARE(switch_status_t) switch_ivr_parse_next_event(switch_core_session_
 
 }
 
-SWITCH_DECLARE(switch_status_t) switch_ivr_parse_all_messages(switch_core_session_t *session)
+SWITCH_DECLARE(switch_status_t) switch_ivr_process_indications(switch_core_session_t *session, switch_core_session_message_t *message)
 {
-	switch_core_session_message_t *message;
+	switch_status_t status = SWITCH_STATUS_SUCCESS;
 	switch_channel_t *channel = switch_core_session_get_channel(session);
-	int i = 0;
-
-	switch_ivr_parse_all_signal_data(session);
-
-	while (switch_core_session_dequeue_message(session, &message) == SWITCH_STATUS_SUCCESS) {
-		i++;
 		
 		switch(message->message_id) {
 		case SWITCH_MESSAGE_INDICATE_ANSWER:
 			if (switch_channel_answer(channel) != SWITCH_STATUS_SUCCESS) {
 				switch_channel_hangup(channel, SWITCH_CAUSE_DESTINATION_OUT_OF_ORDER);
 			}
-			switch_core_session_free_message(&message);
 			break;
 		case SWITCH_MESSAGE_INDICATE_PROGRESS:
 			if (switch_channel_pre_answer(channel) != SWITCH_STATUS_SUCCESS) {
 				switch_channel_hangup(channel, SWITCH_CAUSE_DESTINATION_OUT_OF_ORDER);
 			}
-			switch_core_session_free_message(&message);
 			break;
 		case SWITCH_MESSAGE_INDICATE_RINGING:
 			if (switch_channel_ring_ready(channel) != SWITCH_STATUS_SUCCESS) {
 				switch_channel_hangup(channel, SWITCH_CAUSE_DESTINATION_OUT_OF_ORDER);
 			}
-			switch_core_session_free_message(&message);
 			break;
 		default:
-			switch_core_session_receive_message(session, message);
+		status = SWITCH_STATUS_FALSE;
 			break;
 		}
 
-		message = NULL;
+	return status;
+}
 
+SWITCH_DECLARE(switch_status_t) switch_ivr_parse_all_messages(switch_core_session_t *session)
+{
+	switch_core_session_message_t *message;
+	int i = 0;
+
+	switch_ivr_parse_all_signal_data(session);
+
+	while (switch_core_session_dequeue_message(session, &message) == SWITCH_STATUS_SUCCESS) {
+		i++;
+
+		if (switch_ivr_process_indications(session, message) == SWITCH_STATUS_SUCCESS) {
+			switch_core_session_free_message(&message);
+		} else {
+			switch_core_session_receive_message(session, message);
+			message = NULL;
+		}
 	}
 
 	return i ? SWITCH_STATUS_SUCCESS : SWITCH_STATUS_FALSE;
@@ -2412,7 +2420,7 @@ SWITCH_DECLARE(void) switch_ivr_delay_echo(switch_core_session_t *session, uint3
 		}
 
 		stfu_n_eat(jb, ts, read_frame->payload, read_frame->data, read_frame->datalen, 0);
-		ts += interval;
+		ts += read_impl.samples_per_packet;
 
 		if ((jb_frame = stfu_n_read_a_frame(jb))) {
 			write_frame.data = jb_frame->data;

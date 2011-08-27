@@ -131,12 +131,21 @@ SWITCH_BEGIN_EXTERN_C
 #define SWITCH_COPY_XML_CDR_VARIABLE "copy_xml_cdr"
 #define SWITCH_CURRENT_APPLICATION_VARIABLE "current_application"
 #define SWITCH_PROTO_SPECIFIC_HANGUP_CAUSE_VARIABLE "proto_specific_hangup_cause"
+
 #define SWITCH_CHANNEL_EXECUTE_ON_ANSWER_VARIABLE "execute_on_answer"
 #define SWITCH_CHANNEL_EXECUTE_ON_PRE_ANSWER_VARIABLE "execute_on_pre_answer"
 #define SWITCH_CHANNEL_EXECUTE_ON_MEDIA_VARIABLE "execute_on_media"
-#define SWITCH_CHANNEL_API_ON_ANSWER_VARIABLE "api_on_answer"
 #define SWITCH_CHANNEL_EXECUTE_ON_RING_VARIABLE "execute_on_ring"
 #define SWITCH_CHANNEL_EXECUTE_ON_TONE_DETECT_VARIABLE "execute_on_tone_detect"
+#define SWITCH_CHANNEL_EXECUTE_ON_ORIGINATE_VARIABLE "execute_on_originate"
+
+#define SWITCH_CHANNEL_API_ON_ANSWER_VARIABLE "api_on_answer"
+#define SWITCH_CHANNEL_API_ON_PRE_ANSWER_VARIABLE "api_on_pre_answer"
+#define SWITCH_CHANNEL_API_ON_MEDIA_VARIABLE "api_on_media"
+#define SWITCH_CHANNEL_API_ON_RING_VARIABLE "api_on_ring"
+#define SWITCH_CHANNEL_API_ON_TONE_DETECT_VARIABLE "api_on_tone_detect"
+#define SWITCH_CHANNEL_API_ON_ORIGINATE_VARIABLE "api_on_originate"
+
 #define SWITCH_CALL_TIMEOUT_VARIABLE "call_timeout"
 #define SWITCH_HOLDING_UUID_VARIABLE "holding_uuid"
 #define SWITCH_SOFT_HOLDING_UUID_VARIABLE "soft_holding_uuid"
@@ -193,6 +202,25 @@ SWITCH_BEGIN_EXTERN_C
 #define SWITCH_DTMF_LOG_LEN 1000
 typedef uint8_t switch_byte_t;
 
+/*!
+  \enum switch_dtmf_source_t
+  \brief DTMF sources
+<pre>
+    SWITCH_DTMF_UNKNOWN             - Unknown source
+    SWITCH_DTMF_INBAND_AUDIO        - From audio
+    SWITCH_DTMF_RTP                 - From RTP as a telephone event
+    SWITCH_DTMF_ENDPOINT            - From endpoint signaling
+    SWITCH_DTMF_APP                 - From application
+</pre>
+ */
+typedef enum {
+	SWITCH_DTMF_UNKNOWN,
+	SWITCH_DTMF_INBAND_AUDIO,
+	SWITCH_DTMF_RTP,
+	SWITCH_DTMF_ENDPOINT,
+	SWITCH_DTMF_APP
+} switch_dtmf_source_t;
+
 typedef enum {
 	DTMF_FLAG_SKIP_PROCESS = (1 << 0)
 } dtmf_flag_t;
@@ -201,6 +229,7 @@ typedef struct {
 	char digit;
 	uint32_t duration;
 	int32_t flags;
+	switch_dtmf_source_t source;
 } switch_dtmf_t;
 
 typedef enum {
@@ -267,7 +296,8 @@ typedef enum {
 	SCF_USE_WIN32_MONOTONIC = (1 << 12),
 	SCF_AUTO_SCHEMAS = (1 << 13),
 	SCF_MINIMAL = (1 << 14),
-	SCF_USE_NAT_MAPPING = (1 << 15)
+	SCF_USE_NAT_MAPPING = (1 << 15),
+	SCF_CLEAR_SQL = (1 << 16)
 } switch_core_flag_enum_t;
 typedef uint32_t switch_core_flag_t;
 
@@ -634,13 +664,22 @@ typedef enum {
 	  This flag will never send any. Sheesh....
 	 */
 	
-	RTP_BUG_IGNORE_DTMF_DURATION = (1 << 6)
+	RTP_BUG_IGNORE_DTMF_DURATION = (1 << 6),
 	
 	/*
 	  Guess Who? ... Yep, Sonus (and who know's who else) likes to interweave DTMF with the audio stream making it take
 	  2X as long as it should and sending an incorrect duration making the DTMF very delayed.
 	  This flag will treat every dtmf as if it were 50ms and queue it on recipt of the leading packet rather than at the end.
 	 */
+
+	RTP_BUG_PAUSE_BETWEEN_DTMF = (1 << 7)
+
+	/*
+	  Sonus says they need time to generate the dtmf so we should not send it so fast so with this flag we will wait a few clicks after each send to 
+	  start sending the next one.
+	*/
+
+
 
 } switch_rtp_bug_flag_t;
 
@@ -1117,6 +1156,7 @@ typedef enum {
 	CF_SIGNAL_DATA,
 	CF_SIMPLIFY,
 	/* WARNING: DO NOT ADD ANY FLAGS BELOW THIS LINE */
+	/* IF YOU ADD NEW ONES CHECK IF THEY SHOULD PERSIST OR ZERO THEM IN switch_core_session.c switch_core_session_request_xml() */
 	CF_FLAG_MAX
 } switch_channel_flag_t;
 

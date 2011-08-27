@@ -524,7 +524,6 @@ SWITCH_DECLARE(switch_call_cause_t) switch_core_session_outgoing_channel(switch_
 				switch_snprintf(tmp, sizeof(tmp), "%s%s", rc, vrc);
 				switch_channel_set_variable(peer_channel, SWITCH_ORIGINATOR_CODEC_VARIABLE, tmp);
 			} else if ((ep = switch_channel_get_variable(channel, "ep_codec_string"))) {
-				printf("SET [%s] [%s]\n", switch_channel_get_name(peer_channel), ep);
 				switch_channel_set_variable(peer_channel, SWITCH_ORIGINATOR_CODEC_VARIABLE, ep);
 			}
 
@@ -833,9 +832,11 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_flush_message(switch_core_se
 
 	switch_assert(session != NULL);
 
+
 	if (session->message_queue) {
 		while ((status = (switch_status_t) switch_queue_trypop(session->message_queue, &pop)) == SWITCH_STATUS_SUCCESS) {
 			message = (switch_core_session_message_t *) pop;
+			switch_ivr_process_indications(session, message);
 			switch_core_session_free_message(&message);
 		}
 	}
@@ -1125,14 +1126,20 @@ SWITCH_DECLARE(switch_channel_t *) switch_core_session_get_channel(switch_core_s
 	return session->channel;
 }
 
-SWITCH_DECLARE(void) switch_core_session_wake_session_thread(switch_core_session_t *session)
+SWITCH_DECLARE(switch_status_t) switch_core_session_wake_session_thread(switch_core_session_t *session)
 {
+	switch_status_t status;
+
 	/* If trylock fails the signal is already awake so we needn't bother */
 
-	if (switch_mutex_trylock(session->mutex) == SWITCH_STATUS_SUCCESS) {
+	status = switch_mutex_trylock(session->mutex);
+
+	if (status == SWITCH_STATUS_SUCCESS) {
 		switch_thread_cond_signal(session->cond);
 		switch_mutex_unlock(session->mutex);
 	}
+
+	return status;
 }
 
 SWITCH_DECLARE(void) switch_core_session_signal_state_change(switch_core_session_t *session)
@@ -1515,6 +1522,62 @@ SWITCH_DECLARE(switch_core_session_t *) switch_core_session_request_xml(switch_e
 	parse_array(flag_str, flags, CF_FLAG_MAX);
 	parse_array(cap_str, caps, CC_FLAG_MAX);
 
+	flags[CF_TRANSFER] = 0;
+	flags[CF_ACCEPT_CNG] = 0;
+	flags[CF_REDIRECT] = 0;
+	flags[CF_BRIDGED] = 0;
+	flags[CF_HOLD] = 0;
+	flags[CF_SERVICE] = 0;
+	flags[CF_TAGGED] = 0;
+	flags[CF_WINNER] = 0;
+	flags[CF_CONTROLLED] = 0;
+	flags[CF_SUSPEND] = 0;
+	flags[CF_EVENT_PARSE] = 0;
+	flags[CF_GEN_RINGBACK] = 0;
+	flags[CF_BREAK] = 0;
+	flags[CF_BROADCAST] = 0;
+	flags[CF_UNICAST] = 0;
+	flags[CF_EVENT_LOCK] = 0;
+	flags[CF_EVENT_LOCK_PRI] = 0;
+	flags[CF_RESET] = 0;
+	flags[CF_ORIGINATING] = 0;
+	flags[CF_STOP_BROADCAST] = 0;
+	flags[CF_INNER_BRIDGE] = 0;
+	flags[CF_REQ_MEDIA] = 0;
+	flags[CF_PAUSE_BUGS] = 0;
+	flags[CF_DIVERT_EVENTS] = 0;
+	flags[CF_BLOCK_STATE] = 0;
+	flags[CF_FS_RTP] = 0;
+	flags[CF_REPORTING] = 0;
+	flags[CF_PARK] = 0;
+	flags[CF_TIMESTAMP_SET] = 0;
+	flags[CF_ORIGINATOR] = 0;
+	flags[CF_XFER_ZOMBIE] = 0;
+	flags[CF_MEDIA_ACK] = 0;
+	flags[CF_THREAD_SLEEPING] = 0;
+	flags[CF_DISABLE_RINGBACK] = 0;
+	flags[CF_NOT_READY] = 0;
+	flags[CF_SIGNAL_BRIDGE_TTL] = 0;
+	flags[CF_MEDIA_BRIDGE_TTL] = 0;
+	flags[CF_BYPASS_MEDIA_AFTER_BRIDGE] = 0;
+	flags[CF_LEG_HOLDING] = 0;
+	flags[CF_BROADCAST_DROP_MEDIA] = 0;
+	flags[CF_EARLY_HANGUP] = 0;
+	flags[CF_MEDIA_SET] = 0;
+	flags[CF_CONSUME_ON_ORIGINATE] = 0;
+	flags[CF_PASSTHRU_PTIME_MISMATCH] = 0;
+	flags[CF_BRIDGE_NOWRITE] = 0;
+	flags[CF_RECOVERED] = 0;
+	flags[CF_JITTERBUFFER] = 0;
+	flags[CF_DIALPLAN] = 0;
+	flags[CF_BLOCK_BROADCAST_UNTIL_MEDIA] = 0;
+	flags[CF_CNG_PLC] = 0;
+	flags[CF_ATTENDED_TRANSFER] = 0;
+	flags[CF_LAZY_ATTENDED_TRANSFER] = 0;
+	flags[CF_SIGNAL_DATA] = 0;
+	flags[CF_SIMPLIFY] = 0;
+
+
 	if (!(session = switch_core_session_request_uuid(endpoint_interface, direction, SOF_NO_LIMITS, pool, uuid))) {
 		return NULL;
 	}
@@ -1541,7 +1604,6 @@ SWITCH_DECLARE(switch_core_session_t *) switch_core_session_request_xml(switch_e
 				switch_url_decode(val);
 				switch_channel_set_variable(channel, tag->name, val);
 				if (!strcasecmp(tag->name, "channel_name")) {
-					printf("name %s\n", val);
 					switch_channel_set_name(channel, val);
 				}
 				free(p);

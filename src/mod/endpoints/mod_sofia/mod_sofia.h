@@ -45,7 +45,7 @@
 #define HAVE_APR
 #include <switch.h>
 #include <switch_version.h>
-#define SOFIA_NAT_SESSION_TIMEOUT 1800
+#define SOFIA_NAT_SESSION_TIMEOUT 90
 #define SOFIA_MAX_ACL 100
 #ifdef _MSC_VER
 #define HAVE_FUNCTION 1
@@ -215,6 +215,7 @@ typedef enum {
 	PFLAG_MANAGE_SHARED_APPEARANCE,
 	PFLAG_MANAGE_SHARED_APPEARANCE_SYLANTRO,
 	PFLAG_DISABLE_SRV,
+	PFLAG_DISABLE_SRV503,
 	PFLAG_DISABLE_NAPTR,
 	PFLAG_AUTOFLUSH,
 	PFLAG_NAT_OPTIONS_PING,
@@ -321,7 +322,7 @@ typedef enum {
 	TFLAG_MAX
 } TFLAGS;
 
-#define SOFIA_MAX_MSG_QUEUE 51
+#define SOFIA_MAX_MSG_QUEUE 101
 #define SOFIA_MSG_QUEUE_SIZE 5000
 
 struct mod_sofia_globals {
@@ -354,6 +355,7 @@ struct mod_sofia_globals {
 	int debug_presence;
 	int debug_sla;
 	int auto_restart;
+	int reg_deny_binding_fetch_and_no_lookup; /* backwards compatibility */
 	int auto_nat;
 	int tracelevel;
 	char *capture_server;	
@@ -765,6 +767,8 @@ struct private_object {
 	sofia_cid_type_t cid_type;
 	switch_payload_t payload_space;
 	switch_payload_t ianacodes[SWITCH_MAX_CODECS];
+	uint32_t session_timeout;
+	enum nua_session_refresher session_refresher;
 };
 
 struct callback_t {
@@ -1096,7 +1100,7 @@ void sofia_glue_get_addr(msg_t *msg, char *buf, size_t buflen, int *port);
 sofia_destination_t *sofia_glue_get_destination(char *data);
 void sofia_glue_free_destination(sofia_destination_t *dst);
 switch_status_t sofia_glue_send_notify(sofia_profile_t *profile, const char *user, const char *host, const char *event, const char *contenttype,
-									   const char *body, const char *o_contact, const char *network_ip, const char *call_id);
+									   const char *body, const char *o_contact, const char *network_ip);
 char *sofia_glue_get_extra_headers(switch_channel_t *channel, const char *prefix);
 void sofia_glue_set_extra_headers(switch_channel_t *channel, sip_t const *sip, const char *prefix);
 void sofia_info_send_sipfrag(switch_core_session_t *aleg, switch_core_session_t *bleg);
@@ -1116,6 +1120,7 @@ switch_t38_options_t *sofia_glue_extract_t38_options(switch_core_session_t *sess
 char *sofia_glue_get_multipart(switch_core_session_t *session, const char *prefix, const char *sdp, char **mp_type);
 void sofia_glue_tech_simplify(private_object_t *tech_pvt);
 switch_console_callback_match_t *sofia_reg_find_reg_url_multi(sofia_profile_t *profile, const char *user, const char *host);
+switch_console_callback_match_t *sofia_reg_find_reg_url_with_positive_expires_multi(sofia_profile_t *profile, const char *user, const char *host);
 switch_bool_t sofia_glue_profile_exists(const char *key);
 void sofia_glue_global_siptrace(switch_bool_t on);
 void sofia_glue_global_capture(switch_bool_t on);
